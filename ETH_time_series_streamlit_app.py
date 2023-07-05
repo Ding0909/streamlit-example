@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import dask.dataframe as dd
 import matplotlib.pyplot as plt
 from datetime import datetime
 from statsmodels.tsa.holtwinters import SimpleExpSmoothing, Holt
@@ -13,27 +14,69 @@ from pandas.plotting import autocorrelation_plot, lag_plot
 from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
 from sklearn.metrics import mean_squared_error
 
-# 讀取資料
-@st.cache_data()
-def load_data():
-    df = pd.read_csv('ETH_1min.csv')
-    df = df.sort_values(by='Unix Timestamp')
-    df = df[['Date', 'Close']]
-    # df = df[:100000]
-    custom_date_parser = lambda x: datetime.strptime(x, '%Y-%m-%d %H:%M:%S')
-    df['Date'] = df['Date'].apply(custom_date_parser)
-    df.set_index('Date', inplace=True)
-    return df
 
-df = load_data()
+
+
+def custom_date_parser(x):
+    return pd.to_datetime(x, format='%Y-%m-%d %H:%M:%S')
+
+# 讀取資料
+def load_data():
+    # 創建一個包含所有文件的列表
+    filenames = ['ETH_1min_{:02d}.csv'.format(i) for i in range(20)]
+    
+    # 讀取所有文件並合併成一個Dask DataFrame
+    dfs = [dd.read_csv(filename) for filename in filenames]
+    df = dd.concat(dfs)
+    
+    # 排序
+    df = df.sort_values(by='Unix Timestamp')
+    
+    # 選擇所需的列
+    df = df[['Date', 'Close']]
+    
+    # 將日期列進行自定義日期解析
+    df['Date'] = df['Date'].apply(custom_date_parser, meta=('Date', 'datetime64[ns]'))
+    
+    return df
 
 # 將資料合併成小時級別，並排序按照Date，並將DATE設置為index
 def to_hour(df):
+    df = df.set_index('Date')
     df_hour = df.resample('1H').agg({'Close': 'last'})
-    df_hour.sort_values('Date', inplace=True)
+    df_hour.index.freq = 'H'  # 显式设置频率为小时级别
+    df_hour['Close'] = df_hour['Close'].fillna(method='ffill')
     return df_hour
 
-df_hour = to_hour(df)
+
+df = load_data()
+df = df.compute()
+df = to_hour(df)
+
+
+# def custom_date_parser(x):
+#     return pd.to_datetime(x, format='%Y-%m-%d %H:%M:%S')
+    
+# # 讀取資料
+# def load_data():
+#     df = dd.read_csv('ETH_1min.csv')
+#     df = df.sort_values(by='Unix Timestamp')
+#     df = df[['Date', 'Close']]
+#     df['Date'] = df['Date'].apply(custom_date_parser, meta=('Date', 'datetime64[ns]'))
+#     return df
+
+# # 將資料合併成小時級別，並排序按照Date，並將DATE設置為index
+# def to_hour(df):
+#     df = df.set_index('Date')
+#     df_hour = df.resample('1H').agg({'Close': 'last'})
+#     df_hour['Close'] = df_hour['Close'].fillna(method='ffill')
+#     return df_hour
+
+# df = load_data()
+# df = df.compute()
+# df = to_hour(df)
+
+
 
 # Streamlit應用程式開始
 st.title('Time Series Analysis and Prediction')
@@ -46,26 +89,26 @@ st.write(df)
 # 繪製原始資料圖表
 st.subheader('Original Data Plot + MA50 + MA200')
 fig, ax = plt.subplots(figsize=(16, 10))
-ax.plot(df_hour.Close, c='navy', label='Close')
-ax.plot(df_hour.Close.rolling(window=50).mean(), c='red', label='MA50')
-ax.plot(df_hour.Close.rolling(window=200).mean(), c='orange', label='MA200')
+ax.plot(df.Close, c='navy', label='Close')
+ax.plot(df.Close.rolling(window=50).mean(), c='red', label='MA50')
+ax.plot(df.Close.rolling(window=200).mean(), c='orange', label='MA200')
 ax.legend(loc='upper left')
 st.pyplot(fig)
 
 # 執行simple exponential smoothing
-fit2 = SimpleExpSmoothing(df_hour.Close).fit(smoothing_level=0.6, optimized=False)
-df_hour['SES'] = fit2.fittedvalues
+fit2 = SimpleExpSmoothing(df.Close).fit(smoothing_level=0.6, optimized=False)
+df['SES'] = fit2.fittedvalues
 # 繪製simple exponential smoothing結果圖表
 st.subheader('simple exponential smoothing')
 fig2, ax2 = plt.subplots(figsize=(16, 10))
-ax2.plot(df_hour.Close, c='navy', label='Close')
-ax2.plot(df_hour.SES, c='green', label='SES')
+ax2.plot(df.Close, c='navy', label='Close')
+ax2.plot(df.SES, c='green', label='SES')
 ax2.legend(loc='upper left')
 st.pyplot(fig2)
 
 # 季節性分析
 st.subheader('Seasonailty Analystic')
-to_be_examined = df_hour['Close']
+to_be_examined = df['Close']
 result = seasonal_decompose(to_be_examined, model='multiplicative')
 # 圖表
 fig, ax = plt.subplots(4, 1, figsize=(12, 8), sharex=True)
@@ -106,7 +149,7 @@ st.pyplot(fig)
 
 
 
-edf = df.diff(24).diff(1)[25:] #要注意做diff時 第一項會是na所以要從第一個開始取值
+edf = df.Close.diff(24).diff(1)[25:] #要注意做diff時 第一項會是na所以要從第一個開始取值
 st.subheader('Autocorrelation Plot')
 fig1, ax1 = plt.subplots(figsize=(12, 5))
 plot_acf(edf, lags=30, ax=ax1)
@@ -163,6 +206,5 @@ ax.legend(title='RMSE = %.3f\n' % rmse, shadow=True, fontsize=14)
 
 st.pyplot(fig)
 plt.close(fig)
-
 
 
