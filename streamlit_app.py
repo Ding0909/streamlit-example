@@ -23,8 +23,9 @@ def custom_date_parser(x):
 # 讀取資料
 def load_data():
     # 創建一個包含所有文件的列表
-    filenames = ['ETH_1min_{:02d}.csv'.format(i) for i in range(20)]
-    
+   #filenames = ['ETH_1min_{:02d}.csv'.format(i) for i in range(20)]
+    filenames = ['https://raw.githubusercontent.com/CrayonDing0909/streamlit-example/605cf1d399d0526d0da433c57fe77f8fe060ac61/ETH_1min_{:02d}.csv'.format(i) for i in range(20)]
+
     # 讀取所有文件並合併成一個Dask DataFrame
     dfs = [dd.read_csv(filename) for filename in filenames]
     df = dd.concat(dfs)
